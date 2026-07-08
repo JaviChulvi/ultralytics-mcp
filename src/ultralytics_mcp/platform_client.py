@@ -7,6 +7,7 @@ a credential (FR-002). The server stores nothing (FR-011).
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -18,14 +19,19 @@ from .settings import settings
 class PlatformClient:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        # Pooled connections are bound to the loop that created them; recreate the
+        # client if the running loop changed (test runners create one per test).
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or self._loop is not loop:
             self._client = httpx.AsyncClient(
                 base_url=settings.platform_base_url,
                 timeout=httpx.Timeout(settings.read_timeout, connect=settings.connect_timeout),
             )
+            self._loop = loop
         return self._client
 
     async def request(

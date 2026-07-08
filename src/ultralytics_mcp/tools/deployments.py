@@ -25,22 +25,20 @@ from ..schemas import (
 @platform_errors
 async def list_exports(
     model_id: Annotated[
-        str | None, Field(description="Filter by the source model's id (24-char hex)")
-    ] = None,
+        str, Field(description="The source model's id (24-char hex); the platform requires it")
+    ],
     status: Annotated[str | None, Field(description="Filter by export status")] = None,
     limit: Annotated[
         int | None, Field(description="Max exports to return (default 20, max 50)", ge=1)
     ] = None,
 ) -> dict[str, Any]:
-    """List your model exports (format conversions like ONNX, TensorRT, CoreML).
+    """List a model's exports (format conversions like ONNX, TensorRT, CoreML).
 
-    Read-only — spends nothing. Returns each export's id, source model, format,
-    status, artifact file name and completion time.
+    Read-only — spends nothing. Requires the model's id (find it with list_models).
+    Returns each export's id, format, status, artifact file name and completion time.
     """
     token = get_request_token()
-    params: dict[str, Any] = {"limit": clamp_limit(limit)}
-    if model_id:
-        params["modelId"] = model_id
+    params: dict[str, Any] = {"limit": clamp_limit(limit), "modelId": model_id}
     if status:
         params["status"] = status
     data = await platform_api.get(

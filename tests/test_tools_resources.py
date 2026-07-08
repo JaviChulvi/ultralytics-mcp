@@ -156,7 +156,9 @@ async def test_list_exports_and_deployments(app, platform_mock):
         return_value=httpx.Response(200, json={"deployments": [SAMPLE_DEPLOYMENT], "total": 1})
     )
     async with client_for(app) as client:
-        exports = await client.call_tool("list_exports", {"status": "completed"})
+        exports = await client.call_tool(
+            "list_exports", {"model_id": "a" * 24, "status": "completed"}
+        )
         deployments = await client.call_tool("list_deployments", {})
     assert exports.data["items"][0]["format"] == "onnx"
     assert deployments.data["items"][0]["service_url"] == "https://dep-001.run.app"
