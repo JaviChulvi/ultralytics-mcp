@@ -27,6 +27,11 @@ def clamp_limit(limit: int | None) -> int:
     return max(1, min(limit, settings.max_page_size))
 
 
+def looks_like_object_id(ref: str) -> bool:
+    """Platform ids are 24-char hex; anything else is treated as a slug (D11)."""
+    return len(ref) == 24 and all(c in "0123456789abcdef" for c in ref.lower())
+
+
 class ProjectSummary(BaseModel):
     id: str
     name: str
@@ -245,6 +250,16 @@ class ActivityItem(BaseModel):
             resource_name=data.get("resourceName"),
             timestamp=data.get("timestamp"),
         )
+
+
+class DatasetImagePage(BaseModel):
+    items: list[dict[str, Any]]
+    returned: int
+    total: int | None = None
+    has_more: bool | None = None
+    next_cursor: str | None = None
+    truncated: bool = False
+    note: str | None = None
 
 
 class ListResult(BaseModel):
