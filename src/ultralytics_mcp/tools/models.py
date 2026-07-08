@@ -10,7 +10,13 @@ from pydantic import Field
 from ..auth import get_request_token
 from ..errors import platform_errors
 from ..platform_client import platform_api
-from ..schemas import ModelSummary, clamp_limit, looks_like_object_id, make_list_result
+from ..schemas import (
+    ModelSummary,
+    TrainingStatus,
+    clamp_limit,
+    looks_like_object_id,
+    make_list_result,
+)
 
 
 @platform_errors
@@ -87,6 +93,45 @@ async def get_model(
     return {"model": matches[0].model_dump(exclude_none=True)}
 
 
+@platform_errors
+async def get_training_status(
+    model: Annotated[str, Field(description="Model id (24-char hex) or slug")],
+) -> dict[str, Any]:
+    """Check a model's live training progress: state, epochs, latest metrics.
+
+    Read-only — spends nothing. For a model that is training, returns the current
+    epoch, completion percentage and the latest metric values; for a model that never
+    trained, says so plainly.
+    """
+    token = get_request_token()
+    hint = f"Model '{model}'"
+    model_id = model
+    if not looks_like_object_id(model):
+        data = await platform_api.get(
+            "/api/models", token=token, params={"slug": model, "limit": 5}, resource_hint=hint
+        )
+        matches = [ModelSummary.from_api(item) for item in data.get("models", [])]
+        if not matches:
+            raise ToolError(f"Model '{model}' was not found. Use list_models to find it.")
+        if len(matches) > 1:
+            return {
+                "candidates": [m.model_dump(exclude_none=True) for m in matches],
+                "note": f"Multiple models match '{model}' — call again with the exact id.",
+            }
+        model_id = matches[0].id
+    data = await platform_api.get(
+        f"/api/models/{model_id}/training", token=token, resource_hint=hint
+    )
+    status = TrainingStatus.from_api(model_id, data)
+    if not data.get("trainResults"):
+        status.note = (
+            "This model has no training history — it hasn't started training yet, "
+            "so there is no progress to report."
+        )
+    return status.model_dump(exclude_none=True)
+
+
 def register(mcp) -> None:
     mcp.tool(list_models)
     mcp.tool(get_model)
+    mcp.tool(get_training_status)

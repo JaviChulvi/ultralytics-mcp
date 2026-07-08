@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
+from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from ..auth import get_request_token
 from ..errors import platform_errors
 from ..platform_client import platform_api
-from ..schemas import DeploymentSummary, ExportSummary, clamp_limit, make_list_result
+from ..schemas import (
+    DeploymentStatus,
+    DeploymentSummary,
+    ExportSummary,
+    bounded_dump,
+    clamp_limit,
+    looks_like_object_id,
+    make_list_result,
+)
 
 
 @platform_errors
@@ -74,6 +84,68 @@ async def list_deployments(
     )
 
 
+@platform_errors
+async def get_deployment(
+    deployment: Annotated[str, Field(description="Deployment id (24-char hex), slug or name")],
+) -> dict[str, Any]:
+    """Check one deployment's status, health and performance metrics.
+
+    Read-only — spends nothing. Returns lifecycle status, whether the endpoint is
+    healthy, its latency, and request/error-rate metrics — one call answers
+    "is my endpoint OK?". If a name matches several deployments, the candidates are
+    returned instead of guessing.
+    """
+    token = get_request_token()
+    hint = f"Deployment '{deployment}'"
+    if looks_like_object_id(deployment):
+        detail = await platform_api.get(
+            f"/api/deployments/{deployment}", token=token, resource_hint=hint
+        )
+        summary = DeploymentSummary.from_api(detail.get("deployment", {}))
+    else:
+        data = await platform_api.get(
+            "/api/deployments",
+            token=token,
+            params={"limit": clamp_limit(None)},
+            resource_hint=hint,
+        )
+        matches = [
+            DeploymentSummary.from_api(item)
+            for item in data.get("deployments", [])
+            if deployment in (item.get("slug"), item.get("name"))
+        ]
+        if not matches:
+            raise ToolError(
+                f"Deployment '{deployment}' was not found. "
+                "Use list_deployments to see what's running."
+            )
+        if len(matches) > 1:
+            return {
+                "candidates": [m.model_dump(exclude_none=True) for m in matches],
+                "note": f"Multiple deployments match '{deployment}' — call again with the id.",
+            }
+        summary = matches[0]
+
+    health, metrics = await asyncio.gather(
+        platform_api.get(f"/api/deployments/{summary.id}/health", token=token, resource_hint=hint),
+        platform_api.get(f"/api/deployments/{summary.id}/metrics", token=token, resource_hint=hint),
+        return_exceptions=True,
+    )
+    health_data = {} if isinstance(health, BaseException) else health
+    metrics_summary = {} if isinstance(metrics, BaseException) else (metrics.get("summary") or {})
+    status = DeploymentStatus(
+        deployment=summary,
+        healthy=health_data.get("healthy"),
+        health_error=health_data.get("error"),
+        latency_ms=health_data.get("latencyMs"),
+        total_requests=metrics_summary.get("totalRequests"),
+        error_rate=metrics_summary.get("errorRate"),
+        avg_latency_ms=metrics_summary.get("avgLatencyMs"),
+    )
+    return bounded_dump(status)
+
+
 def register(mcp) -> None:
     mcp.tool(list_exports)
     mcp.tool(list_deployments)
+    mcp.tool(get_deployment)
