@@ -43,12 +43,13 @@ def _register_tools() -> None:
     if _tools_registered:
         return
     _tools_registered = True
-    from .tools import datasets, deployments, models, projects
+    from .tools import account, datasets, deployments, models, projects
 
     projects.register(mcp)
     datasets.register(mcp)
     models.register(mcp)
     deployments.register(mcp)
+    account.register(mcp)
 
 
 def create_app():
