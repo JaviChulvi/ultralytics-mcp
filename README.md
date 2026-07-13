@@ -27,6 +27,14 @@ credits — without opening the web app. This is a hosted
 If the key is missing or wrong, every tool answers with instructions on where to create
 and configure one — nothing else is needed to troubleshoot.
 
+To remove the server later:
+
+```bash
+claude mcp remove --scope user ultralytics
+```
+
+(`claude mcp list` shows what is registered and at which scope.)
+
 ## Tools
 
 All 13 tools are read-only and spend nothing.
@@ -68,6 +76,7 @@ docker build -t ultralytics-mcp . && docker run -p 8000:8000 ultralytics-mcp
 
 For local testing, register the dev instance instead of the hosted URL:
 `claude mcp add --transport http ultralytics-dev http://127.0.0.1:8000/mcp --header "Authorization: Bearer ul_YOUR_KEY"`.
+Remove it with `claude mcp remove ultralytics-dev` when you're done.
 
 ### Project layout
 

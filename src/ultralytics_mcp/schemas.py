@@ -19,6 +19,10 @@ TRUNCATION_NOTE = (
     "or pagination to narrow it down."
 )
 
+# Long class lists (e.g. 80 COCO names) dominate list payloads; previews keep them
+# readable while class_names_omitted says what was cut. get_dataset keeps full stats.
+CLASS_NAMES_PREVIEW = 15
+
 
 def clamp_limit(limit: int | None) -> int:
     """Apply the default page size and the hard cap (SC-005)."""
@@ -61,10 +65,16 @@ class DatasetSummary(BaseModel):
     image_count: int | None = None
     class_count: int | None = None
     class_names: list[str] | None = None
+    class_names_omitted: int | None = None
     splits: dict[str, Any] | None = None
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> DatasetSummary:
+        class_names = data.get("classNames")
+        omitted = None
+        if class_names and len(class_names) > CLASS_NAMES_PREVIEW:
+            omitted = len(class_names) - CLASS_NAMES_PREVIEW
+            class_names = class_names[:CLASS_NAMES_PREVIEW]
         return cls(
             id=str(data.get("_id", "")),
             name=data.get("name", ""),
@@ -73,7 +83,8 @@ class DatasetSummary(BaseModel):
             visibility=data.get("visibility"),
             image_count=data.get("imageCount"),
             class_count=data.get("classCount"),
-            class_names=data.get("classNames"),
+            class_names=class_names,
+            class_names_omitted=omitted,
             splits=data.get("splits"),
         )
 
@@ -102,6 +113,9 @@ class DatasetDetail(BaseModel):
     dataset: DatasetSummary
     classes: list[ClassStat] | None = None
     stats_sampled: bool | None = None
+    stats_sample_size: int | None = None
+    image_stats: dict[str, Any] | None = None
+    image_stats_note: str | None = None
 
 
 class DatasetImage(BaseModel):
