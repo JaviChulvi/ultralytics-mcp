@@ -215,18 +215,35 @@ class ExportSummary(BaseModel):
     model_id: str | None = None
     format: str | None = None
     status: str | None = None
+    gpu_type: str | None = None
     file: str | None = None
+    file_size_bytes: int | None = None
+    download_url: str | None = None
     error: str | None = None
     completed_at: str | None = None
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> ExportSummary:
+        # ``file`` is a plain name in older payloads, an object with a signed
+        # downloadUrl in current ones — normalize both.
+        file = data.get("file")
+        name, size, url = None, None, None
+        if isinstance(file, dict):
+            path = file.get("path") or ""
+            name = file.get("downloadFilename") or (path.rsplit("/", 1)[-1] or None)
+            size = file.get("size")
+            url = file.get("downloadUrl")
+        elif isinstance(file, str):
+            name = file
         return cls(
             id=str(data.get("_id", "")),
             model_id=data.get("modelId"),
             format=data.get("format"),
             status=data.get("status"),
-            file=data.get("file"),
+            gpu_type=data.get("gpuType"),
+            file=name,
+            file_size_bytes=size,
+            download_url=url,
             error=data.get("error"),
             completed_at=data.get("completedAt"),
         )

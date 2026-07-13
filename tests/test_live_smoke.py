@@ -66,6 +66,36 @@ async def test_dataset_download_and_lineage_live(app):
         assert "items" in lineage
 
 
+async def test_export_cycle_live(app):
+    """Create a real export job, poll it once, then remove it (self-cleaning)."""
+    from fastmcp.exceptions import ToolError
+
+    async with client_for(app, token=KEY) as client:
+        projects = (await client.call_tool("list_projects", {"limit": 5})).data
+        model_id = None
+        for project in projects["items"]:
+            models = (await client.call_tool("list_models", {"project": project["id"]})).data
+            completed = [m for m in models["items"] if m.get("status") == "completed"]
+            if completed:
+                model_id = completed[0]["id"]
+                break
+        if not model_id:
+            pytest.skip("account has no completed model to export")
+        try:
+            created = (
+                await client.call_tool("create_export", {"model": model_id, "format": "onnx"})
+            ).data
+        except ToolError as exc:
+            if "already" in str(exc):
+                pytest.skip("an onnx export is already in flight on this model")
+            raise
+        export_id = created["export_id"]
+        polled = (await client.call_tool("get_export", {"export_id": export_id})).data
+        assert polled["status"] in ("queued", "starting", "running", "completed", "failed")
+        removed = (await client.call_tool("delete_export", {"export_id": export_id})).data
+        assert removed["action"] in ("cancelled", "deleted")
+
+
 async def test_discovery_live(app):
     async with client_for(app, token=KEY) as client:
         search = (await client.call_tool("search_platform", {"query": "coco"})).data
