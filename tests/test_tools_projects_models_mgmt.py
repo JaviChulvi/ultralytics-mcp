@@ -122,9 +122,7 @@ async def test_model_slug_ambiguity_returns_candidates(app, platform_mock):
         {**SAMPLE_MODEL, "_id": "m1" + "0" * 22},
         {**SAMPLE_MODEL, "_id": "m2" + "0" * 22},
     ]
-    platform_mock.get("/api/models").mock(
-        return_value=httpx.Response(200, json={"models": twins})
-    )
+    platform_mock.get("/api/models").mock(return_value=httpx.Response(200, json={"models": twins}))
     async with client_for(app) as client:
         result = await client.call_tool("update_model", {"model": "detector-v1", "name": "x"})
     data = result.data

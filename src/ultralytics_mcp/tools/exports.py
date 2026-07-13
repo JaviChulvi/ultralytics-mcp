@@ -62,9 +62,7 @@ async def list_exports(
         "/api/exports", token=token, params=params, resource_hint="Your export list"
     )
     exports = [ExportSummary.from_api(item) for item in data.get("exports", [])]
-    return make_list_result(
-        exports, empty_note="No exports yet — create one with create_export."
-    )
+    return make_list_result(exports, empty_note="No exports yet — create one with create_export.")
 
 
 @platform_errors

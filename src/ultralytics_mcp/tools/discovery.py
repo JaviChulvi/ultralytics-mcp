@@ -40,8 +40,7 @@ async def search_platform(
     task: Annotated[
         str | None,
         Field(
-            description="Datasets only — comma-separated YOLO tasks to keep, "
-            "e.g. 'detect,segment'"
+            description="Datasets only — comma-separated YOLO tasks to keep, e.g. 'detect,segment'"
         ),
     ] = None,
     author: Annotated[str | None, Field(description="Only results by this username")] = None,

@@ -94,9 +94,7 @@ async def start_training(
         str,
         Field(description="Platform dataset to train on: id, slug or 'username/slug'"),
     ],
-    project: Annotated[
-        str, Field(description="Project (id or slug) the new model is created in")
-    ],
+    project: Annotated[str, Field(description="Project (id or slug) the new model is created in")],
     base_model: Annotated[
         str,
         Field(
@@ -111,9 +109,7 @@ async def start_training(
     imgsz: Annotated[
         int | None, Field(description="Training image size (default 640)", ge=32, le=4096)
     ] = None,
-    batch: Annotated[
-        int | None, Field(description="Batch size (-1 = auto)", ge=-1, le=512)
-    ] = None,
+    batch: Annotated[int | None, Field(description="Batch size (-1 = auto)", ge=-1, le=512)] = None,
     model_name: Annotated[
         str | None, Field(description="Name for the new model (default: exp, exp-2, ...)")
     ] = None,

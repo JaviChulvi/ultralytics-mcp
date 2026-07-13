@@ -185,9 +185,7 @@ async def get_model_files(
     ]
     result: dict[str, Any] = {"files": files}
     if not files:
-        result["note"] = (
-            "No weight files yet — the model has to complete a training run first."
-        )
+        result["note"] = "No weight files yet — the model has to complete a training run first."
     else:
         result["note"] = "Download URLs are signed and short-lived — use them promptly."
     return result

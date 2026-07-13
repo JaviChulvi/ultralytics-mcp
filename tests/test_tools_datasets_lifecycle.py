@@ -15,7 +15,9 @@ DS_ID = "a" * 24
 
 async def test_get_dataset_download_current(app, platform_mock):
     platform_mock.get(f"/api/datasets/{DS_ID}/export").mock(
-        return_value=httpx.Response(200, json={"downloadUrl": "https://gcs/x.ndjson", "cached": True})
+        return_value=httpx.Response(
+            200, json={"downloadUrl": "https://gcs/x.ndjson", "cached": True}
+        )
     )
     async with client_for(app) as client:
         result = await client.call_tool("get_dataset_download", {"dataset": DS_ID})
@@ -27,7 +29,9 @@ async def test_get_dataset_download_current(app, platform_mock):
 
 async def test_get_dataset_download_version_param(app, platform_mock):
     route = platform_mock.get(f"/api/datasets/{DS_ID}/export", params={"v": 3}).mock(
-        return_value=httpx.Response(200, json={"downloadUrl": "https://gcs/v3.ndjson", "version": 3})
+        return_value=httpx.Response(
+            200, json={"downloadUrl": "https://gcs/v3.ndjson", "version": 3}
+        )
     )
     async with client_for(app) as client:
         result = await client.call_tool("get_dataset_download", {"dataset": DS_ID, "version": 3})

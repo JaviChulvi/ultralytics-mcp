@@ -85,10 +85,8 @@ def translate(error: PlatformError) -> ToolError:
     elif status == 409:
         in_flight = detail.get("existingJobId") or detail.get("exportId")
         job_note = f" (in-flight id: {in_flight})" if in_flight else ""
-        message = (
-            f"{reason or f'{hint} already has this operation in progress or conflicts with existing state.'}"
-            f"{job_note} Wait for the current operation to finish, then retry."
-        )
+        conflict = reason or f"{hint} already has this operation in progress."
+        message = f"{conflict}{job_note} Wait for the current operation to finish, then retry."
     elif status == 429:
         message = (
             "The platform is rate-limiting requests right now. "

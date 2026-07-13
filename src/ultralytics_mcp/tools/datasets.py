@@ -619,9 +619,7 @@ async def create_dataset(
 @platform_errors
 async def update_dataset(
     dataset: Annotated[str, Field(description="Dataset id (24-char hex) or slug")],
-    name: Annotated[
-        str | None, Field(description="New name (the slug changes with it)")
-    ] = None,
+    name: Annotated[str | None, Field(description="New name (the slug changes with it)")] = None,
     description: Annotated[str | None, Field(description="New description")] = None,
     visibility: Annotated[str | None, Field(description="'public' or 'private'")] = None,
     tags: Annotated[list[str] | None, Field(description="Replacement tag list")] = None,
@@ -644,7 +642,9 @@ async def update_dataset(
     if tags is not None:
         updates["tags"] = tags
     if not updates:
-        raise ToolError("Nothing to update — pass at least one of name/description/visibility/tags.")
+        raise ToolError(
+            "Nothing to update — pass at least one of name/description/visibility/tags."
+        )
     token = get_request_token()
     resolved = await _resolve_dataset_id_or_candidates(token, dataset, None)
     if isinstance(resolved, dict):
