@@ -23,6 +23,22 @@ TRUNCATION_NOTE = (
 # readable while class_names_omitted says what was cut. get_dataset keeps full stats.
 CLASS_NAMES_PREVIEW = 15
 
+DESCRIPTION_PREVIEW = 200
+
+
+def preview_class_names(names: list[str] | None) -> tuple[list[str] | None, int | None]:
+    """Cap a class-name list at the preview size, reporting how many were cut."""
+    if names and len(names) > CLASS_NAMES_PREVIEW:
+        return names[:CLASS_NAMES_PREVIEW], len(names) - CLASS_NAMES_PREVIEW
+    return names, None
+
+
+def trim_text(text: Any, limit: int = DESCRIPTION_PREVIEW) -> str | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    text = text.strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
 
 def clamp_limit(limit: int | None) -> int:
     """Apply the default page size and the hard cap (SC-005)."""
@@ -70,11 +86,7 @@ class DatasetSummary(BaseModel):
 
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> DatasetSummary:
-        class_names = data.get("classNames")
-        omitted = None
-        if class_names and len(class_names) > CLASS_NAMES_PREVIEW:
-            omitted = len(class_names) - CLASS_NAMES_PREVIEW
-            class_names = class_names[:CLASS_NAMES_PREVIEW]
+        class_names, omitted = preview_class_names(data.get("classNames"))
         return cls(
             id=str(data.get("_id", "")),
             name=data.get("name", ""),
@@ -248,6 +260,85 @@ class AccountStatus(BaseModel):
     plan: str | None = None
     storage_tier: str | None = None
     storage_used_bytes: float | None = None
+
+
+class ExploreItem(BaseModel):
+    """One public catalog hit — a project or a dataset, tagged by ``type``."""
+
+    type: str
+    id: str
+    name: str
+    slug: str | None = None
+    username: str | None = None
+    description: str | None = None
+    task: str | None = None
+    image_count: int | None = None
+    class_count: int | None = None
+    class_names: list[str] | None = None
+    class_names_omitted: int | None = None
+    model_count: int | None = None
+    model_names: list[str] | None = None
+    star_count: int | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_project(cls, data: dict[str, Any]) -> ExploreItem:
+        return cls(
+            type="project",
+            id=str(data.get("_id", "")),
+            name=data.get("name", ""),
+            slug=data.get("slug"),
+            username=data.get("username"),
+            description=trim_text(data.get("description")),
+            model_count=data.get("modelCount"),
+            model_names=(data.get("modelNames") or None) and data["modelNames"][:5],
+            star_count=data.get("starCount"),
+            updated_at=data.get("updatedAt"),
+        )
+
+    @classmethod
+    def from_dataset(cls, data: dict[str, Any]) -> ExploreItem:
+        class_names, omitted = preview_class_names(data.get("classNames"))
+        return cls(
+            type="dataset",
+            id=str(data.get("_id", "")),
+            name=data.get("name", ""),
+            slug=data.get("slug"),
+            username=data.get("username"),
+            description=trim_text(data.get("description")),
+            task=data.get("task"),
+            image_count=data.get("imageCount"),
+            class_count=data.get("classCount"),
+            class_names=class_names,
+            class_names_omitted=omitted,
+            star_count=data.get("starCount"),
+            updated_at=data.get("updatedAt"),
+        )
+
+
+class UserProfile(BaseModel):
+    username: str | None = None
+    full_name: str | None = None
+    account_type: str | None = None
+    bio: str | None = None
+    company: str | None = None
+    use_case: str | None = None
+    follower_count: int | None = None
+    socials: dict[str, Any] | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> UserProfile:
+        socials = data.get("socials")
+        return cls(
+            username=data.get("username"),
+            full_name=data.get("fullName"),
+            account_type=data.get("accountType"),
+            bio=trim_text(data.get("bio")),
+            company=data.get("company"),
+            use_case=data.get("useCase"),
+            follower_count=data.get("followerCount"),
+            socials={k: v for k, v in socials.items() if v} if isinstance(socials, dict) else None,
+        )
 
 
 class ActivityItem(BaseModel):

@@ -54,6 +54,17 @@ async def test_exports_and_deployments_live(app):
                 assert "items" in exports
 
 
+async def test_discovery_live(app):
+    async with client_for(app, token=KEY) as client:
+        search = (await client.call_tool("search_platform", {"query": "coco"})).data
+        assert "items" in search
+        if search["items"]:
+            username = search["items"][0].get("username")
+            if username:
+                profile = (await client.call_tool("get_user_profile", {"username": username})).data
+                assert profile["user"].get("username") == username
+
+
 @pytest.mark.xfail(
     reason="platform currently rejects API keys on billing/storage/activity endpoints "
     "(2026-07-08); raised with the platform team",
