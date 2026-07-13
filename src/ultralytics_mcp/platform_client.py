@@ -41,15 +41,24 @@ class PlatformClient:
         *,
         token: str,
         params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         resource_hint: str | None = None,
     ) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {token}"}
         try:
-            response = await self.client.request(method, path, params=params, headers=headers)
+            response = await self.client.request(
+                method, path, params=params, json=json, headers=headers
+            )
         except httpx.HTTPError as exc:
             raise PlatformError(None, resource_hint) from exc
         if response.status_code >= 400:
-            raise PlatformError(response.status_code, resource_hint)
+            # Error bodies carry actionable structure (error text, quota numbers,
+            # in-flight job ids) that the translation layer surfaces to the user.
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = None
+            raise PlatformError(response.status_code, resource_hint, detail=detail)
         return response.json()
 
     async def get(
@@ -62,6 +71,45 @@ class PlatformClient:
     ) -> dict[str, Any]:
         return await self.request(
             "GET", path, token=token, params=params, resource_hint=resource_hint
+        )
+
+    async def post(
+        self,
+        path: str,
+        *,
+        token: str,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        resource_hint: str | None = None,
+    ) -> dict[str, Any]:
+        return await self.request(
+            "POST", path, token=token, params=params, json=json, resource_hint=resource_hint
+        )
+
+    async def patch(
+        self,
+        path: str,
+        *,
+        token: str,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        resource_hint: str | None = None,
+    ) -> dict[str, Any]:
+        return await self.request(
+            "PATCH", path, token=token, params=params, json=json, resource_hint=resource_hint
+        )
+
+    async def delete(
+        self,
+        path: str,
+        *,
+        token: str,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        resource_hint: str | None = None,
+    ) -> dict[str, Any]:
+        return await self.request(
+            "DELETE", path, token=token, params=params, json=json, resource_hint=resource_hint
         )
 
 

@@ -43,3 +43,49 @@ def test_translate_leaks_nothing_internal(status, hint, expected):
 def test_credential_guidance_names_key_location():
     assert "Settings > API Keys" in CREDENTIAL_GUIDANCE
     assert "platform.ultralytics.com" in CREDENTIAL_GUIDANCE
+
+
+DETAIL_CASES = [
+    pytest.param(
+        402,
+        {"error": "Insufficient balance for this training run."},
+        ["insufficient balance", "top up", "billing"],
+        id="402-insufficient-balance",
+    ),
+    pytest.param(
+        403,
+        {"error": "Quota exceeded", "quotaType": "deployments", "current": 3, "limit": 3},
+        ["deployments quota", "3/3", "upgrade"],
+        id="403-quota",
+    ),
+    pytest.param(
+        403,
+        {"error": "B200 GPUs require a Pro plan.", "code": "GPU_TIER_RESTRICTED"},
+        ["b200", "pro plan", "upgrade"],
+        id="403-tier-gate",
+    ),
+    pytest.param(
+        409,
+        {"error": "Dataset is already processing.", "existingJobId": "job_42"},
+        ["already processing", "job_42", "retry"],
+        id="409-in-flight-job",
+    ),
+    pytest.param(
+        400,
+        {"error": "trainArgs.epochs must be between 1 and 10000"},
+        ["http 400", "epochs must be between"],
+        id="400-upstream-reason",
+    ),
+]
+
+
+@pytest.mark.parametrize(("status", "detail", "expected"), DETAIL_CASES)
+def test_translate_surfaces_structured_detail(status, detail, expected):
+    message = str(translate(PlatformError(status, "Dataset 'x'", detail=detail))).lower()
+    for fragment in expected:
+        assert fragment in message, f"expected {fragment!r} in {message!r}"
+
+
+def test_translate_ignores_non_dict_detail():
+    message = str(translate(PlatformError(400, None, detail=["not", "a", "dict"])))
+    assert "HTTP 400" in message
