@@ -383,6 +383,33 @@ class ActivityItem(BaseModel):
         )
 
 
+class TrashItem(BaseModel):
+    id: str
+    type: str | None = None
+    name: str | None = None
+    slug: str | None = None
+    trashed_at: str | None = None
+    days_remaining: int | None = None
+    cascaded_count: int | None = None
+    size_bytes: int | None = None
+    parent_project: str | None = None
+
+    @classmethod
+    def from_api(cls, data: dict[str, Any]) -> TrashItem:
+        parent = data.get("parentProject") or {}
+        return cls(
+            id=str(data.get("_id", "")),
+            type=data.get("type"),
+            name=data.get("name"),
+            slug=data.get("slug"),
+            trashed_at=data.get("trashedAt"),
+            days_remaining=data.get("daysRemaining"),
+            cascaded_count=data.get("cascadedCount"),
+            size_bytes=data.get("sizeBytes"),
+            parent_project=parent.get("slug") if isinstance(parent, dict) else None,
+        )
+
+
 class DatasetImagePage(BaseModel):
     items: list[dict[str, Any]]
     returned: int

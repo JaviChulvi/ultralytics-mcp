@@ -96,6 +96,47 @@ async def test_export_cycle_live(app):
         assert removed["action"] in ("cancelled", "deleted")
 
 
+async def test_dataset_write_cycle_live(app):
+    """Full write cycle against the real platform: create → rename → trash →
+    restore → trash → purge. Ends with nothing left behind."""
+    async with client_for(app, token=KEY) as client:
+        created = (
+            await client.call_tool(
+                "create_dataset", {"name": "mcp-smoke-cycle", "task": "detect"}
+            )
+        ).data
+        ds_id = created["dataset_id"]
+        try:
+            renamed = (
+                await client.call_tool(
+                    "update_dataset", {"dataset": ds_id, "description": "smoke test artifact"}
+                )
+            ).data
+            assert renamed["success"] is True
+            trashed = (await client.call_tool("delete_dataset", {"dataset": ds_id})).data
+            assert trashed["success"] is True
+            trash = (await client.call_tool("list_trash", {"type": "dataset"})).data
+            assert any(i["id"] == ds_id for i in trash["items"])
+            restored = (
+                await client.call_tool(
+                    "restore_from_trash", {"item_id": ds_id, "type": "dataset"}
+                )
+            ).data
+            assert restored["success"] is True
+        finally:
+            # Leave no trace: trash (idempotent even if already trashed) then purge.
+            try:
+                await client.call_tool("delete_dataset", {"dataset": ds_id})
+            except Exception:
+                pass
+            purged = (
+                await client.call_tool(
+                    "purge_from_trash", {"item_id": ds_id, "type": "dataset", "confirm": True}
+                )
+            ).data
+            assert purged["success"] is True
+
+
 async def test_training_gate_live(app):
     """GPU stock is readable and the spend gate holds — without billing anything."""
     from fastmcp.exceptions import ToolError
