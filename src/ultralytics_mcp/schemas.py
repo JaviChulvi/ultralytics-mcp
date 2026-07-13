@@ -8,6 +8,7 @@ follow tests/fixtures/openapi.json (the vendored upstream contract).
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from pydantic import BaseModel
@@ -38,6 +39,14 @@ def trim_text(text: Any, limit: int = DESCRIPTION_PREVIEW) -> str | None:
         return None
     text = text.strip()
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def slugify(name: str) -> str:
+    """Derive a platform slug (^[a-z0-9-]+$) from a display name."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not slug:
+        raise ValueError("name must contain at least one letter or number")
+    return slug
 
 
 def clamp_limit(limit: int | None) -> int:

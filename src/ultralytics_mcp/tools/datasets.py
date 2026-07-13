@@ -7,7 +7,6 @@ which it is. Nothing here spends credits — dataset work costs storage quota on
 from __future__ import annotations
 
 import asyncio
-import re
 import statistics
 from typing import Annotated, Any
 
@@ -29,6 +28,7 @@ from ..schemas import (
     clamp_limit,
     looks_like_object_id,
     make_list_result,
+    slugify,
 )
 from ..settings import settings
 
@@ -425,10 +425,10 @@ async def list_dataset_images(
 
 
 def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    if not slug:
-        raise ToolError("The name must contain at least one letter or number.")
-    return slug
+    try:
+        return slugify(name)
+    except ValueError:
+        raise ToolError("The name must contain at least one letter or number.") from None
 
 
 async def _resolve_dataset_id_or_candidates(
