@@ -54,6 +54,18 @@ async def test_exports_and_deployments_live(app):
                 assert "items" in exports
 
 
+async def test_dataset_download_and_lineage_live(app):
+    async with client_for(app, token=KEY) as client:
+        datasets = (await client.call_tool("list_datasets", {"limit": 1})).data
+        if not datasets["items"]:
+            pytest.skip("account has no datasets")
+        ds_id = datasets["items"][0]["id"]
+        download = (await client.call_tool("get_dataset_download", {"dataset": ds_id})).data
+        assert download["download_url"].startswith("http")
+        lineage = (await client.call_tool("list_dataset_models", {"dataset": ds_id})).data
+        assert "items" in lineage
+
+
 async def test_discovery_live(app):
     async with client_for(app, token=KEY) as client:
         search = (await client.call_tool("search_platform", {"query": "coco"})).data

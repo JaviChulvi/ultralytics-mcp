@@ -15,11 +15,14 @@ from . import __version__
 from .settings import settings
 
 INSTRUCTIONS = (
-    "Read-only tools for the Ultralytics Platform (platform.ultralytics.com): browse "
-    "projects, datasets, models, exports and deployments, monitor training progress "
-    "and endpoint health, and check account credit balance, storage and activity. "
-    "No tool changes platform state or spends credits. Every request must carry the "
-    "user's own platform API key as an 'Authorization: Bearer ul_...' HTTP header."
+    "Tools for the Ultralytics Platform (platform.ultralytics.com): search the public "
+    "catalog; browse, import and edit datasets; manage projects, models, exports and "
+    "deployments; monitor training and endpoint health; and check account status. "
+    "Every tool's description says whether it is read-only or state-changing. No tool "
+    "spends credits unless its description says so explicitly, and anything that "
+    "would spend requires an explicit confirmation parameter. Every request must "
+    "carry the user's own platform API key as an 'Authorization: Bearer ul_...' "
+    "HTTP header."
 )
 
 mcp = FastMCP(

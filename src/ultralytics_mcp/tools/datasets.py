@@ -1,8 +1,13 @@
-"""Dataset tools (US2, FR-003). All read-only."""
+"""Dataset tools (US2, FR-003): browse, download, import and edit datasets.
+
+Read-only tools and state-changing tools live side by side; every docstring says
+which it is. Nothing here spends credits — dataset work costs storage quota only.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import re
 import statistics
 from typing import Annotated, Any
 
@@ -18,6 +23,8 @@ from ..schemas import (
     DatasetImage,
     DatasetImagePage,
     DatasetSummary,
+    ListResult,
+    ModelSummary,
     bounded_dump,
     clamp_limit,
     looks_like_object_id,
@@ -26,6 +33,8 @@ from ..schemas import (
 from ..settings import settings
 
 SPLIT_NAMES = ("train", "val", "test")
+TASK_TYPES = ("detect", "segment", "semantic", "classify", "pose", "obb")
+VISIBILITIES = ("public", "private")
 IMAGE_FIELDS = ("hash", "name", "split", "width", "height", "label_count")
 IMAGE_STATS_NOTE = (
     "'overall' summarizes platform-computed whole-dataset histograms — approximate "
@@ -415,7 +424,341 @@ async def list_dataset_images(
     return bounded_dump(page)
 
 
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not slug:
+        raise ToolError("The name must contain at least one letter or number.")
+    return slug
+
+
+async def _resolve_dataset_id_or_candidates(
+    token: str, dataset: str, username: str | None
+) -> tuple[str, str | None] | dict[str, Any]:
+    """Resolve to (id, owner) for action tools, or the candidates payload if ambiguous."""
+    resolved, username, _ = await _resolve_dataset(token, dataset, username)
+    if isinstance(resolved, list):
+        return _candidates(resolved, dataset)
+    return resolved, username
+
+
+@platform_errors
+async def get_dataset_download(
+    dataset: Annotated[
+        str, Field(description="Dataset id (24-char hex), slug, or 'username/slug'")
+    ],
+    version: Annotated[
+        int | None,
+        Field(description="A saved version number — omit for the current data", ge=1),
+    ] = None,
+    username: Annotated[
+        str | None,
+        Field(description="Owner username when referencing another user's public dataset"),
+    ] = None,
+) -> dict[str, Any]:
+    """Get a download link for a dataset (current data or a saved version).
+
+    Read-only — spends nothing. Returns a signed URL to an NDJSON export: one
+    dataset-metadata line, then one line per image with a signed image URL and its
+    annotations. The link stays valid for about 7 days. Fails with a conflict while
+    the dataset is still processing an import.
+    """
+    token = get_request_token()
+    resolved = await _resolve_dataset_id_or_candidates(token, dataset, username)
+    if isinstance(resolved, dict):
+        return resolved
+    dataset_id, _ = resolved
+    params = {"v": version} if version is not None else None
+    data = await platform_api.get(
+        f"/api/datasets/{dataset_id}/export",
+        token=token,
+        params=params,
+        resource_hint=f"Download of dataset '{dataset}'",
+    )
+    result: dict[str, Any] = {
+        "download_url": data.get("downloadUrl"),
+        "format": "ndjson",
+        "note": "Signed URL, valid ~7 days. NDJSON: first line is dataset metadata, "
+        "then one line per image with a signed image URL and annotations.",
+    }
+    if data.get("version") is not None:
+        result["version"] = data["version"]
+    return result
+
+
+@platform_errors
+async def create_dataset_version(
+    dataset: Annotated[
+        str, Field(description="Dataset id (24-char hex), slug, or 'username/slug'")
+    ],
+    description: Annotated[
+        str | None, Field(description="What this snapshot captures, e.g. 'before relabeling'")
+    ] = None,
+) -> dict[str, Any]:
+    """Snapshot a dataset as an immutable numbered version.
+
+    State-changing — spends no credits. Captures the dataset's current images and
+    labels so they can be downloaded (get_dataset_download) or restored later even
+    after edits. Take one before bulk label changes.
+    """
+    token = get_request_token()
+    resolved = await _resolve_dataset_id_or_candidates(token, dataset, None)
+    if isinstance(resolved, dict):
+        return resolved
+    dataset_id, _ = resolved
+    body: dict[str, Any] = {"description": description} if description else {}
+    data = await platform_api.post(
+        f"/api/datasets/{dataset_id}/export",
+        token=token,
+        json=body,
+        resource_hint=f"Version snapshot of dataset '{dataset}'",
+    )
+    return {
+        "version": data.get("version"),
+        "download_url": data.get("downloadUrl"),
+        "note": "Immutable snapshot created — restore or download it by this version number.",
+    }
+
+
+@platform_errors
+async def list_dataset_models(
+    dataset: Annotated[
+        str, Field(description="Dataset id (24-char hex), slug, or 'username/slug'")
+    ],
+    username: Annotated[
+        str | None,
+        Field(description="Owner username when referencing another user's public dataset"),
+    ] = None,
+) -> dict[str, Any]:
+    """List the models that were trained on a dataset (its lineage).
+
+    Read-only — spends nothing. Returns each model's id, name, project, training
+    status and best fitness — useful to see whether a dataset already has trained
+    models before starting a new run.
+    """
+    token = get_request_token()
+    resolved = await _resolve_dataset_id_or_candidates(token, dataset, username)
+    if isinstance(resolved, dict):
+        return resolved
+    dataset_id, owner = resolved
+    params = {"username": owner} if owner else None
+    data = await platform_api.get(
+        f"/api/datasets/{dataset_id}/models",
+        token=token,
+        params=params,
+        resource_hint=f"Models trained on dataset '{dataset}'",
+    )
+    items = []
+    for raw in data.get("models", []):
+        item = ModelSummary.from_api(raw).model_dump(exclude_none=True)
+        if raw.get("projectSlug"):
+            item["project_slug"] = raw["projectSlug"]
+        if raw.get("username"):
+            item["username"] = raw["username"]
+        items.append(item)
+    result = ListResult(
+        items=items,
+        returned=len(items),
+        total=data.get("count"),
+        note="No models have been trained on this dataset yet." if not items else None,
+    )
+    return bounded_dump(result)
+
+
+async def _create_dataset(token: str, name: str, task: str, **extra: Any) -> dict[str, Any]:
+    if task not in TASK_TYPES:
+        raise ToolError(f"Unknown task '{task}' — choose from: {', '.join(TASK_TYPES)}.")
+    body: dict[str, Any] = {"name": name, "slug": _slugify(name), "task": task}
+    body.update({k: v for k, v in extra.items() if v})
+    data = await platform_api.post(
+        "/api/datasets", token=token, json=body, resource_hint=f"Dataset '{name}'"
+    )
+    return {"dataset_id": data.get("datasetId"), "slug": data.get("slug")}
+
+
+@platform_errors
+async def create_dataset(
+    name: Annotated[str, Field(description="Human-readable dataset name")],
+    task: Annotated[
+        str, Field(description="YOLO task: detect, segment, semantic, classify, pose or obb")
+    ] = "detect",
+    description: Annotated[str | None, Field(description="What the dataset contains")] = None,
+    visibility: Annotated[
+        str | None, Field(description="'public' or 'private' (platform default: private)")
+    ] = None,
+    class_names: Annotated[
+        list[str] | None, Field(description="Initial class names, in index order")
+    ] = None,
+    owner: Annotated[
+        str | None, Field(description="Team username, to create in a team workspace")
+    ] = None,
+) -> dict[str, Any]:
+    """Create an empty dataset record.
+
+    State-changing — spends no credits. Makes the record only; add images with
+    import_dataset_from_url (or the platform UI for local files). The slug is
+    derived from the name and de-duplicated by the platform.
+    """
+    if visibility is not None and visibility not in VISIBILITIES:
+        raise ToolError(f"visibility must be one of: {', '.join(VISIBILITIES)}.")
+    token = get_request_token()
+    created = await _create_dataset(
+        token,
+        name,
+        task,
+        description=description,
+        visibility=visibility,
+        classNames=class_names,
+        owner=owner,
+    )
+    return {
+        **created,
+        "note": "Empty dataset created — import images with import_dataset_from_url.",
+    }
+
+
+@platform_errors
+async def update_dataset(
+    dataset: Annotated[str, Field(description="Dataset id (24-char hex) or slug")],
+    name: Annotated[
+        str | None, Field(description="New name (the slug changes with it)")
+    ] = None,
+    description: Annotated[str | None, Field(description="New description")] = None,
+    visibility: Annotated[str | None, Field(description="'public' or 'private'")] = None,
+    tags: Annotated[list[str] | None, Field(description="Replacement tag list")] = None,
+) -> dict[str, Any]:
+    """Rename or edit a dataset's metadata.
+
+    State-changing — spends no credits. Updates only the fields you pass. Renaming
+    changes the slug (the response returns the new one) and keeps dependent models'
+    references intact.
+    """
+    if visibility is not None and visibility not in VISIBILITIES:
+        raise ToolError(f"visibility must be one of: {', '.join(VISIBILITIES)}.")
+    updates: dict[str, Any] = {}
+    if name is not None:
+        updates["name"] = name
+    if description is not None:
+        updates["description"] = description
+    if visibility is not None:
+        updates["visibility"] = visibility
+    if tags is not None:
+        updates["tags"] = tags
+    if not updates:
+        raise ToolError("Nothing to update — pass at least one of name/description/visibility/tags.")
+    token = get_request_token()
+    resolved = await _resolve_dataset_id_or_candidates(token, dataset, None)
+    if isinstance(resolved, dict):
+        return resolved
+    dataset_id, _ = resolved
+    data = await platform_api.patch(
+        f"/api/datasets/{dataset_id}",
+        token=token,
+        json=updates,
+        resource_hint=f"Dataset '{dataset}'",
+    )
+    return {"success": bool(data.get("success")), "slug": data.get("slug")}
+
+
+@platform_errors
+async def delete_dataset(
+    dataset: Annotated[str, Field(description="Dataset id (24-char hex) or slug")],
+) -> dict[str, Any]:
+    """Move a dataset to the trash (soft delete).
+
+    State-changing — spends no credits. The dataset is recoverable for 30 days with
+    restore_from_trash; after that a daily cleanup removes it permanently. Trashed
+    items still count toward storage.
+    """
+    token = get_request_token()
+    resolved = await _resolve_dataset_id_or_candidates(token, dataset, None)
+    if isinstance(resolved, dict):
+        return resolved
+    dataset_id, _ = resolved
+    await platform_api.delete(
+        f"/api/datasets/{dataset_id}", token=token, resource_hint=f"Dataset '{dataset}'"
+    )
+    return {
+        "success": True,
+        "dataset_id": dataset_id,
+        "note": "Moved to trash — recoverable for 30 days with restore_from_trash.",
+    }
+
+
+@platform_errors
+async def import_dataset_from_url(
+    source_url: Annotated[
+        str,
+        Field(
+            description="Public or signed URL of a dataset archive (.zip, .tar, .tar.gz, "
+            ".tgz) or .ndjson file in YOLO/COCO/VOC layout"
+        ),
+    ],
+    dataset: Annotated[
+        str | None,
+        Field(description="Existing dataset (id or slug) to import into — omit to create one"),
+    ] = None,
+    name: Annotated[
+        str | None,
+        Field(description="Name for a NEW dataset — provide this or 'dataset', not both"),
+    ] = None,
+    task: Annotated[
+        str, Field(description="Task for a new dataset: detect, segment, classify, pose, obb")
+    ] = "detect",
+    target_split: Annotated[
+        str | None,
+        Field(description="Force all imported images into one split: train, val or test"),
+    ] = None,
+) -> dict[str, Any]:
+    """Import images and labels into a dataset from an archive URL.
+
+    State-changing — spends no credits (storage quota applies). Creates the dataset
+    when you pass a name, then queues an asynchronous ingest job that downloads,
+    extracts and validates the archive. Poll get_dataset until its status is 'ready';
+    a conflict error means an import is already running.
+    """
+    if (dataset is None) == (name is None):
+        raise ToolError("Provide exactly one of 'dataset' (existing) or 'name' (create new).")
+    if target_split is not None and target_split not in SPLIT_NAMES:
+        raise ToolError(f"target_split must be one of: {', '.join(SPLIT_NAMES)}.")
+    token = get_request_token()
+    slug = None
+    if name is not None:
+        created = await _create_dataset(token, name, task)
+        dataset_id, slug = created["dataset_id"], created["slug"]
+    else:
+        resolved = await _resolve_dataset_id_or_candidates(token, dataset, None)
+        if isinstance(resolved, dict):
+            return resolved
+        dataset_id, _ = resolved
+    body: dict[str, Any] = {"datasetId": dataset_id, "sourceUrl": source_url}
+    if target_split:
+        body["targetSplit"] = target_split
+    data = await platform_api.post(
+        "/api/datasets/ingest",
+        token=token,
+        json=body,
+        resource_hint=f"Import into dataset '{name or dataset}'",
+    )
+    result: dict[str, Any] = {
+        "dataset_id": dataset_id,
+        "job_id": data.get("jobId"),
+        "status": data.get("status", "queued"),
+        "note": "Import runs asynchronously — poll get_dataset until the dataset "
+        "status is 'ready' (large archives can take a while).",
+    }
+    if slug:
+        result["slug"] = slug
+    return result
+
+
 def register(mcp) -> None:
     mcp.tool(list_datasets)
     mcp.tool(get_dataset)
     mcp.tool(list_dataset_images)
+    mcp.tool(get_dataset_download)
+    mcp.tool(create_dataset_version)
+    mcp.tool(list_dataset_models)
+    mcp.tool(create_dataset)
+    mcp.tool(update_dataset)
+    mcp.tool(delete_dataset)
+    mcp.tool(import_dataset_from_url)
