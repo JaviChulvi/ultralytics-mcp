@@ -96,6 +96,27 @@ async def test_export_cycle_live(app):
         assert removed["action"] in ("cancelled", "deleted")
 
 
+async def test_training_gate_live(app):
+    """GPU stock is readable and the spend gate holds — without billing anything."""
+    from fastmcp.exceptions import ToolError
+
+    async with client_for(app, token=KEY) as client:
+        gpus = (await client.call_tool("get_gpu_availability", {})).data
+        assert any(g["id"] == "rtx-4090" for g in gpus["gpus"])
+        datasets = (await client.call_tool("list_datasets", {"limit": 1})).data
+        projects = (await client.call_tool("list_projects", {"limit": 1})).data
+        if not (datasets["items"] and projects["items"]):
+            pytest.skip("account lacks a dataset/project pair")
+        with pytest.raises(ToolError, match="SPENDS CREDITS"):
+            await client.call_tool(
+                "start_training",
+                {
+                    "dataset": datasets["items"][0]["id"],
+                    "project": projects["items"][0]["id"],
+                },
+            )
+
+
 async def test_discovery_live(app):
     async with client_for(app, token=KEY) as client:
         search = (await client.call_tool("search_platform", {"query": "coco"})).data
