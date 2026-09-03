@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal
 
+from ultralytics_platform import APIConnectionError, APIError
+
 from ..errors import sdk_errors
 from ..runtime import runtime
 from .common import provided
@@ -63,7 +65,19 @@ async def get_deployment(
         client.deployments.retrieve(resolved_owner, deployment),
         client.deployments.health(resolved_owner, deployment),
         client.deployments.metrics(resolved_owner, deployment, range=metrics_range),
+        return_exceptions=True,
     )
+    for result in (detail, health, metrics):
+        if isinstance(result, BaseException) and not isinstance(
+            result, (APIError, APIConnectionError)
+        ):
+            raise result
+    if isinstance(detail, (APIError, APIConnectionError)):
+        raise detail
+    if isinstance(health, (APIError, APIConnectionError)):
+        health = None
+    if isinstance(metrics, (APIError, APIConnectionError)):
+        metrics = None
     return {"deployment": detail, "health": health, "metrics": metrics}
 
 

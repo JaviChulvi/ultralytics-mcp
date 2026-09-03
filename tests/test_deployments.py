@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ultralytics_platform import APIError
+
 from ultralytics_mcp.tools.deployments import (
     create_deployment,
     delete_deployment,
@@ -37,6 +39,20 @@ async def test_deployment_detail_preserves_three_raw_responses(sdk):
     sdk.deployments.retrieve.assert_awaited_once_with("team", "prod")
     sdk.deployments.health.assert_awaited_once_with("team", "prod")
     sdk.deployments.metrics.assert_awaited_once_with("team", "prod", range="24h")
+
+
+async def test_deployment_detail_survives_unavailable_health_and_metrics(sdk):
+    sdk.deployments.retrieve.return_value = {"deployment": {"status": "deploying"}}
+    sdk.deployments.health.side_effect = APIError(400, '{"error":"no service URL"}')
+    sdk.deployments.metrics.side_effect = APIError(400, '{"error":"deployment not ready"}')
+
+    result = await get_deployment("prod", owner="team")
+
+    assert result == {
+        "deployment": {"deployment": {"status": "deploying"}},
+        "health": None,
+        "metrics": None,
+    }
 
 
 async def test_delete_deployment_requires_confirmation(sdk):
