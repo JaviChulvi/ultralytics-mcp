@@ -1,125 +1,70 @@
-"""Translate upstream platform failures into actionable user-facing messages.
-
-Every failure names its cause and a next step (FR-007, SC-004). Nothing internal —
-status codes aside, no tracebacks, and never the credential — reaches the user.
-"""
+"""Convert official SDK failures into safe, actionable MCP tool errors."""
 
 from __future__ import annotations
 
 import functools
+import re
+from collections.abc import Callable
+from typing import Any
 
 from fastmcp.exceptions import ToolError
-
-CREDENTIAL_GUIDANCE = (
-    "Your Ultralytics Platform API key is missing or was rejected. Create one at "
-    "https://platform.ultralytics.com under Settings > API Keys, add it to your "
-    "assistant's MCP configuration as an 'Authorization: Bearer ul_...' header, "
-    "then try again."
-)
+from ultralytics_platform import APIConnectionError, APIError
 
 
-class PlatformError(Exception):
-    """An upstream platform call failed.
-
-    ``status`` is the HTTP status code, or ``None`` for network/timeout failures.
-    ``resource_hint`` names what was being looked up, for useful 404 messages.
-    ``detail`` is the parsed error body when the platform sent one — its ``error``
-    text, quota numbers and in-flight job ids make the translated message concrete.
-    """
-
-    def __init__(
-        self,
-        status: int | None,
-        resource_hint: str | None = None,
-        detail: dict | None = None,
-    ):
-        self.status = status
-        self.resource_hint = resource_hint
-        self.detail = detail if isinstance(detail, dict) else None
-        super().__init__(f"platform request failed (status={status})")
-
-
-def _upstream_reason(detail: dict | None) -> str | None:
-    """The platform's own error text, bounded — platform-authored, never internal."""
-    if not detail:
+def _reason(error: APIError) -> str | None:
+    detail = error.json
+    if not isinstance(detail, dict):
         return None
-    reason = detail.get("error") or detail.get("message")
-    if isinstance(reason, str) and reason.strip():
-        return reason.strip()[:300]
-    return None
+    value = detail.get("error") or detail.get("message")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return re.sub(r"ul_[A-Za-z0-9_-]+", "[REDACTED]", value.strip())[:300]
 
 
-def translate(error: PlatformError) -> ToolError:
-    status = error.status
-    hint = error.resource_hint or "The requested resource"
-    detail = error.detail or {}
-    reason = _upstream_reason(error.detail)
+def translate(error: APIError | APIConnectionError) -> ToolError:
+    if isinstance(error, APIConnectionError):
+        return ToolError(
+            "The connection to the Ultralytics Platform failed. Check the resource's "
+            "current status before retrying a mutation because the request outcome is unknown."
+        )
+
+    status = error.status_code
+    reason = _reason(error)
+    request = f" Request ID: {error.request_id}." if error.request_id else ""
     if status == 401:
-        message = CREDENTIAL_GUIDANCE
+        message = (
+            "ULTRALYTICS_API_KEY is missing or invalid. Create or replace it at "
+            "https://platform.ultralytics.com/settings?tab=api-keys."
+        )
     elif status == 402:
-        message = (
-            f"{reason or 'Your account balance is too low for this operation.'} "
-            "Top up credits at platform.ultralytics.com under Settings > Billing, "
-            "then try again."
-        )
+        message = reason or "Your account does not have enough credits for this operation."
+        message += " Add credits in Platform billing and try again."
     elif status == 403:
-        if detail.get("quotaType"):
-            current, limit = detail.get("current"), detail.get("limit")
-            usage = f" ({current}/{limit} used)" if current is not None else ""
-            message = (
-                f"Your plan's {detail['quotaType']} quota is full{usage}. "
-                "Free up capacity or upgrade the plan at platform.ultralytics.com."
-            )
-        elif reason:
-            message = f"{reason} Upgrade options are at platform.ultralytics.com."
-        else:
-            message = (
-                f"{hint} exists but your account doesn't have access to it. "
-                "Check that you're using the right account's API key."
-            )
+        message = reason or "Your account cannot perform this operation."
+        message += " Check workspace permissions, plan limits, and quotas."
     elif status == 404:
-        message = (
-            f"{hint} was not found on the platform. Check the id or name — "
-            "the list tools can help find the right one."
-        )
+        message = reason or "The requested Platform resource was not found."
+        message += " Check the owner and resource slugs."
     elif status == 409:
-        in_flight = detail.get("existingJobId") or detail.get("exportId")
-        job_note = f" (in-flight id: {in_flight})" if in_flight else ""
-        conflict = reason or f"{hint} already has this operation in progress."
-        message = f"{conflict}{job_note} Wait for the current operation to finish, then retry."
+        message = reason or "A conflicting operation is already in progress."
+        message += " Inspect the current resource status instead of retrying immediately."
     elif status == 429:
-        message = (
-            "The platform is rate-limiting requests right now. "
-            "Wait a moment and try again — retrying is safe."
-        )
-    elif status is not None and status >= 500:
-        message = (
-            "The Ultralytics Platform is temporarily unavailable (server error). "
-            "Nothing was changed; retrying later is safe."
-        )
-    elif status is None:
-        message = (
-            "Could not reach the Ultralytics Platform (network problem or timeout). "
-            "Nothing was changed; retrying later is safe."
-        )
-    elif reason:
-        message = f"The platform rejected the request (HTTP {status}): {reason}"
+        message = "The Platform is rate-limiting requests. Wait briefly and try again."
+    elif status >= 500:
+        message = "The Ultralytics Platform is temporarily unavailable. Try again later."
     else:
-        message = (
-            f"The platform rejected the request (HTTP {status}). "
-            "Check the tool inputs and try again."
-        )
-    return ToolError(message)
+        message = reason or f"The Platform rejected the request with HTTP {status}."
+    return ToolError(message + request)
 
 
-def platform_errors(fn):
-    """Uniform failure behavior for every tool: PlatformError → actionable ToolError (D7)."""
+def sdk_errors(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Apply uniform SDK error handling to an asynchronous MCP tool."""
 
-    @functools.wraps(fn)
-    async def wrapper(*args, **kwargs):
+    @functools.wraps(function)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
-            return await fn(*args, **kwargs)
-        except PlatformError as exc:
-            raise translate(exc) from None
+            return await function(*args, **kwargs)
+        except (APIError, APIConnectionError) as error:
+            raise translate(error) from None
 
-    return wrapper
+    return wrapped

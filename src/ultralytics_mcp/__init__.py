@@ -1,3 +1,3 @@
-"""Hosted MCP server exposing the Ultralytics Platform API as AI-assistant tools."""
+"""Ultralytics Platform MCP."""
 
 __version__ = "0.1.0"

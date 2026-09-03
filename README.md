@@ -1,146 +1,109 @@
 # Ultralytics Platform MCP
 
-Work with your [Ultralytics Platform](https://platform.ultralytics.com) account from
-your AI assistant in plain language — search the public catalog, import and edit
-datasets, start and monitor training, export models, manage deployments and check
-credits — without opening the web app. This is a hosted
-[MCP](https://modelcontextprotocol.io) server: there is nothing to install.
+A local [Model Context Protocol](https://modelcontextprotocol.io) server powered
+exclusively by the official [`ultralytics-platform`](https://pypi.org/project/ultralytics-platform/)
+Python SDK. It gives AI assistants a focused tool surface for discovering datasets,
+training models, exporting artifacts, and operating managed deployments.
 
-## Quickstart (under 5 minutes)
+## Setup
 
-1. **Create an API key** — go to [platform.ultralytics.com](https://platform.ultralytics.com)
-   → **Settings → API Keys** and create a key (it starts with `ul_`).
-
-2. **Register the server with your assistant** — for Claude Code, one command:
-
-   ```bash
-   claude mcp add --scope user --transport http ultralytics \
-     https://mcp.ultralytics.com/mcp \
-     --header "Authorization: Bearer ul_YOUR_KEY_HERE"
-   ```
-
-   Your key stays in your local configuration and is sent only with your own requests.
-
-3. **Ask a question** — start your assistant and try:
-
-   > what projects do I have on the platform?
-
-If the key is missing or wrong, every tool answers with instructions on where to create
-and configure one — nothing else is needed to troubleshoot.
-
-To remove the server later:
+Create an API key in [Ultralytics Platform settings](https://platform.ultralytics.com/settings?tab=api-keys),
+then expose it to the process that launches the MCP:
 
 ```bash
-claude mcp remove --scope user ultralytics
+export ULTRALYTICS_API_KEY=ul_your_key
+uv sync
+uv run ultralytics-mcp
 ```
 
-(`claude mcp list` shows what is registered and at which scope.)
+The server uses stdio and stores no credentials. All Platform communication is made
+by `AsyncPlatform`; this repository contains no raw API transport or copied OpenAPI
+contract.
+
+### Claude Code
+
+```bash
+claude mcp add --scope user --transport stdio \
+  --env ULTRALYTICS_API_KEY="$ULTRALYTICS_API_KEY" \
+  ultralytics -- uv --directory /absolute/path/to/ultralytics-mcp run ultralytics-mcp
+```
+
+Any MCP client that can launch a stdio command can use the same executable and pass
+`ULTRALYTICS_API_KEY` in the child-process environment.
 
 ## Tools
 
-Every tool says in its description whether it is read-only or state-changing.
-**Exactly one tool spends credits — `start_training` — and it refuses to run
-without an explicit `confirm_spend=true`.** Deletes are soft (30-day trash) unless
-marked permanent, and the permanent ones require `confirm=true`.
+The 26 tools cover the complete first-release workflow.
 
-### Discover
+### Account and discovery
 
-| Tool | What it answers |
-|---|---|
-| `search_platform` | "Find me a public dataset for wildfire smoke" |
-| `get_user_profile` | "Who is @ultralytics?" |
+- `get_account_status` — get the authenticated workspace, plan, credits, storage,
+  and resource counts.
+- `search_platform` — search public Platform projects and datasets.
+
+### Projects
+
+- `list_projects` — list projects in a personal or team workspace.
+- `get_project` — get a project and its model summaries.
+- `create_project` — create a project in a personal or team workspace.
 
 ### Datasets
 
-| Tool | What it does |
-|---|---|
-| `list_datasets` / `get_dataset` | Browse datasets; class stats and image statistics |
-| `list_dataset_images` | Page through images (filter by split / labeled) |
-| `list_dataset_models` | Models trained on a dataset (lineage) |
-| `get_dataset_download` | Signed NDJSON download link (current or a version) |
-| `create_dataset_version` | Immutable snapshot before risky edits |
-| `create_dataset` / `update_dataset` / `delete_dataset` | Create, rename, trash |
-| `import_dataset_from_url` | Import an archive URL into a new or existing dataset |
+- `list_datasets` — list datasets, optionally including samples and image URLs.
+- `get_dataset` — get dataset details and optional class and image statistics.
+- `create_dataset` — create an empty dataset.
+- `import_dataset_from_url` — ingest a remote archive or NDJSON file into a dataset.
+- `get_dataset_download` — get a signed download URL for a dataset or saved version.
+- `create_dataset_version` — create an immutable dataset snapshot.
 
-### Projects & models
+### Models
 
-| Tool | What it does |
-|---|---|
-| `list_projects` / `get_project` | Browse projects |
-| `create_project` / `update_project` / `delete_project` | Create, rename, trash |
-| `list_models` / `get_model` | Browse models and their metrics |
-| `get_model_files` | Signed download links for trained weights |
-| `update_model` / `delete_model` | Rename, trash |
+- `list_models` — list models in a project.
+- `get_model` — get model details or validation analysis.
+- `get_model_files` — get signed download links for a model's files.
 
 ### Training
 
-| Tool | What it does |
-|---|---|
-| `get_gpu_availability` | GPU stock and hourly prices |
-| `get_training_status` | Live epochs, progress and latest metrics |
-| `start_training` | Start a cloud run — **spends credits, confirm-gated** |
+- `get_training_status` — get live training progress, metrics, and terminal status.
+- `get_gpu_availability` — get current managed cloud GPU availability.
+- `start_training` — create a model and start a confirmed, credit-spending cloud run.
+- `cancel_training` — stop a confirmed active training run.
 
-### Exports & deployments
+### Exports
 
-| Tool | What it does |
-|---|---|
-| `list_exports` / `get_export` | Browse exports; poll one until completed |
-| `create_export` / `delete_export` | Export to ONNX/TensorRT/CoreML/... ; cancel or remove |
-| `list_deployments` / `get_deployment` | Endpoints, health and latency |
-| `create_deployment` | Deploy a model to a dedicated endpoint |
-| `delete_deployment` | Remove an endpoint — **permanent, confirm-gated** |
+- `list_exports` — list export jobs for a model.
+- `create_export` — start an asynchronous model export.
+- `get_export` — get export status and its download URL when complete.
 
-### Account
+### Deployments
 
-| Tool | What it does |
-|---|---|
-| `get_account_status` | Credits, plan and storage |
-| `get_recent_activity` | Recent account events |
-| `list_trash` / `restore_from_trash` | What's expiring; bring items back |
-| `purge_from_trash` | Free storage now — **permanent, confirm-gated** |
+- `list_deployments` — list managed inference endpoints.
+- `create_deployment` — create a managed inference endpoint for a model.
+- `get_deployment` — get deployment details, health, and metrics when available.
+- `get_deployment_logs` — get recent deployment logs.
+- `delete_deployment` — permanently delete a deployment after confirmation.
+
+Training is the only credit-spending tool and will not start unless
+`confirm_spend=true`. Cancellation and permanent deployment deletion likewise require
+explicit confirmation.
+
+Try prompts such as:
+
+- “Show my datasets and inspect the class statistics for forklifts.”
+- “Check my credits and GPU availability, then estimate a YOLO26n training run.”
+- “Export warehouse/detector as ONNX and check whether the export is ready.”
+- “List my deployments and investigate any unhealthy endpoint.”
 
 ## Development
 
 ```bash
-# one-time: install uv (https://docs.astral.sh/uv/)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-uv sync                    # reproducible environment from uv.lock
-uv run pytest              # tests (platform API mocked)
-uv run ruff check .        # lint
-uv run uvicorn ultralytics_mcp.server:app --port 8000   # run locally
+uv sync
+uv run ruff check .
+uv run pytest
 ```
 
-Optional checks:
+Live read-only smoke tests are opt-in:
 
 ```bash
-ULTRALYTICS_TEST_API_KEY=ul_... uv run pytest -m live   # live smoke vs the real API
-docker build -t ultralytics-mcp . && docker run -p 8000:8000 ultralytics-mcp
+ULTRALYTICS_TEST_API_KEY=ul_test_key uv run pytest -m live
 ```
-
-The live smoke suite is self-cleaning (it creates, trashes and purges its own
-artifacts) and never starts a billed training run. Point it at a local platform
-instance with `ULTRALYTICS_MCP_PLATFORM_BASE_URL=http://localhost:3002`.
-
-For local testing, register the dev instance instead of the hosted URL:
-`claude mcp add --transport http ultralytics-dev http://127.0.0.1:8000/mcp --header "Authorization: Bearer ul_YOUR_KEY"`.
-Remove it with `claude mcp remove ultralytics-dev` when you're done.
-
-### Project layout
-
-```
-src/ultralytics_mcp/
-├── server.py            FastMCP app (stateless streamable HTTP at /mcp, /health)
-├── auth.py              per-request Bearer token extraction — no credential storage
-├── platform_client.py   one pooled httpx client; auth header set per request
-├── errors.py            uniform, actionable error messages for every failure
-├── schemas.py           whitelisted output models + response size cap (8 KB)
-└── tools/               tools grouped by functionality: projects, datasets,
-                         models, training, exports, deployments, account, discovery
-tests/                   respx-mocked suite + opt-in live smoke tests
-tests/fixtures/openapi.json   vendored upstream API contract snapshot
-```
-
-The upstream contract this code was written against is vendored at
-`tests/fixtures/openapi.json`; re-download it from
-`https://platform.ultralytics.com/openapi.json` and diff to spot upstream changes.

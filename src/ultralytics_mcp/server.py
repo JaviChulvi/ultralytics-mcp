@@ -1,76 +1,49 @@
-"""FastMCP server: hosted, stateless, streamable-HTTP MCP endpoint at /mcp (FR-001).
-
-Run with: uvicorn ultralytics_mcp.server:app --host 0.0.0.0 --port 8000
-"""
+"""Stdio entry point for the SDK-first Ultralytics Platform MCP."""
 
 from __future__ import annotations
 
-import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from . import __version__
-from .settings import settings
+from .runtime import PlatformRuntime, runtime
+from .tools import register_tools
 
-INSTRUCTIONS = (
-    "Tools for the Ultralytics Platform (platform.ultralytics.com): search the public "
-    "catalog; browse, import and edit datasets; manage projects, models, exports and "
-    "deployments; monitor training and endpoint health; and check account status. "
-    "Every tool's description says whether it is read-only or state-changing. No tool "
-    "spends credits unless its description says so explicitly, and anything that "
-    "would spend requires an explicit confirmation parameter. Every request must "
-    "carry the user's own platform API key as an 'Authorization: Bearer ul_...' "
-    "HTTP header."
-)
+INSTRUCTIONS = """\
+Use these tools to work with the Ultralytics Platform through the official Python SDK.
+ULTRALYTICS_API_KEY identifies the personal workspace; pass owner explicitly for a
+team or public workspace. Read tool descriptions before mutations. Cloud training
+spends credits and requires confirm_spend=true. Training cancellation and permanent
+deployment deletion require confirm=true. Poll status tools for asynchronous work.
+"""
+
+
+@asynccontextmanager
+async def lifespan(server: FastMCP) -> AsyncIterator[PlatformRuntime]:
+    del server
+    await runtime.start()
+    try:
+        yield runtime
+    finally:
+        await runtime.close()
+
 
 mcp = FastMCP(
     name="Ultralytics Platform",
     instructions=INSTRUCTIONS,
     version=__version__,
+    lifespan=lifespan,
     mask_error_details=True,
 )
+register_tools(mcp)
 
 
-@mcp.custom_route("/health", methods=["GET"])
-async def health(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "ok", "version": __version__})
+def main() -> None:
+    """Run the local MCP over stdio."""
+    mcp.run(transport="stdio", show_banner=False)
 
 
-_tools_registered = False
-
-
-def _register_tools() -> None:
-    global _tools_registered
-    if _tools_registered:
-        return
-    _tools_registered = True
-    from .tools import (
-        account,
-        datasets,
-        deployments,
-        discovery,
-        exports,
-        models,
-        projects,
-        training,
-    )
-
-    projects.register(mcp)
-    datasets.register(mcp)
-    models.register(mcp)
-    training.register(mcp)
-    exports.register(mcp)
-    deployments.register(mcp)
-    account.register(mcp)
-    discovery.register(mcp)
-
-
-def create_app():
-    logging.basicConfig(level=settings.log_level)
-    _register_tools()
-    return mcp.http_app(path="/mcp", stateless_http=True)
-
-
-app = create_app()
+if __name__ == "__main__":
+    main()

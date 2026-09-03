@@ -1,1 +1,10 @@
-"""Tool modules; each exposes a register(mcp) hook called by server.py."""
+"""Register the curated Ultralytics Platform tool surface."""
+
+from __future__ import annotations
+
+
+def register_tools(mcp) -> None:
+    from . import account, datasets, deployments, exports, models, projects
+
+    for module in (account, projects, datasets, models, exports, deployments):
+        module.register(mcp)
