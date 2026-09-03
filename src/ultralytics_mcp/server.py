@@ -9,6 +9,7 @@ from fastmcp import FastMCP
 
 from . import __version__
 from .runtime import PlatformRuntime, runtime
+from .tools import register_tools
 
 INSTRUCTIONS = """\
 Use these tools to work with the Ultralytics Platform through the official Python SDK.
@@ -36,6 +37,7 @@ mcp = FastMCP(
     lifespan=lifespan,
     mask_error_details=True,
 )
+register_tools(mcp)
 
 
 def main() -> None:
